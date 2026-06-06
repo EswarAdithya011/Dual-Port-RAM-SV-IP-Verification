@@ -1,0 +1,52 @@
+# ===========================
+# Cadence Xcelium / Xrun
+# ===========================
+xcelium.d/
+xrun.log
+xrun.history
+cds.lib
+cov_work/
+work/
+
+# ===========================
+# SimVision
+# ===========================
+.simvision/
+
+# ===========================
+# Waveform dumps
+# ===========================
+*.vcd
+*.fsdb
+*.shm/
+
+# ===========================
+# External / Vendor Libraries
+# ===========================
+ACCELLERA_OVL_VHDL_LIB/
+
+# ===========================
+# Shell config (not project files)
+# ===========================
+.bash_logout
+.bash_profile
+.bashrc
+
+# ===========================
+# Specman
+# ===========================
+specman
+
+# ===========================
+# OS / Editor
+# ===========================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# ===========================
+# Archives
+# ===========================
+*.zip

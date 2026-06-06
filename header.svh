@@ -1,0 +1,13 @@
+// `include "params.sv"   — imported via package, not direct include
+`include "interface.sv"
+`include "transaction.sv"
+`include "reference_model.sv"
+`include "scoreboard.sv"
+`include "coverage.sv"
+`include "generator.sv"
+`include "read_driver.sv"
+`include "write_driver.sv"
+`include "read_monitor.sv"
+`include "write_monitor.sv"
+`include "environment.sv"
+`include "test.sv"
