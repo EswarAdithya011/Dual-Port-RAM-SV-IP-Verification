@@ -1,143 +1,260 @@
-# Dual-Port RAM — SystemVerilog IP Verification
+<p align="center">
+  <h1 align="center">Dual-Port RAM — SystemVerilog IP Verification</h1>
+  <p align="center">
+    A production-grade, layered SystemVerilog verification environment for a synchronous dual-port RAM IP.
+    <br />
+    <a href="#architecture"><strong>Architecture »</strong></a>
+    &nbsp;&middot;&nbsp;
+    <a href="#verification-plan"><strong>Verification Plan »</strong></a>
+    &nbsp;&middot;&nbsp;
+    <a href="#getting-started"><strong>Getting Started »</strong></a>
+  </p>
+</p>
 
-A complete **SystemVerilog** verification environment for a **synchronous Dual-Port RAM** with independent read and write ports. Built from scratch without UVM, using a layered testbench architecture with constrained-random stimulus, functional coverage, SVA assertions, and a self-checking scoreboard.
+<p align="center">
+  <img src="https://img.shields.io/badge/Language-SystemVerilog-blue?style=flat-square" alt="Language" />
+  <img src="https://img.shields.io/badge/Methodology-Layered%20Testbench-green?style=flat-square" alt="Methodology" />
+  <img src="https://img.shields.io/badge/Simulator-Cadence%20Xcelium-orange?style=flat-square" alt="Simulator" />
+  <img src="https://img.shields.io/badge/Coverage-Functional%20%2B%20Assertions-purple?style=flat-square" alt="Coverage" />
+  <img src="https://img.shields.io/badge/Status-Passing-brightgreen?style=flat-square" alt="Status" />
+</p>
 
 ---
 
-## 📐 Architecture
+## Table of Contents
+
+- [Overview](#overview)
+- [Design Under Test](#design-under-test)
+- [Architecture](#architecture)
+- [Directory Structure](#directory-structure)
+- [Verification Plan](#verification-plan)
+  - [Constrained-Random Stimulus](#1-constrained-random-stimulus)
+  - [Self-Checking Scoreboard](#2-self-checking-scoreboard)
+  - [Functional Coverage](#3-functional-coverage)
+  - [SVA Assertions](#4-sva-assertions)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Running the Simulation](#running-the-simulation)
+  - [Expected Output](#expected-output)
+- [Configuration](#configuration)
+- [Key Design Decisions](#key-design-decisions)
+- [References](#references)
+- [License](#license)
+- [Author](#author)
+
+---
+
+## Overview
+
+This repository contains a **complete, self-checking verification environment** for a parameterized synchronous **Dual-Port RAM** IP core. The testbench is built using a **layered architecture** (without UVM) and employs industry-standard verification techniques:
+
+- **Constrained-random stimulus** with intelligent biasing and hazard avoidance
+- **Reference model** with shadow memory for golden comparison
+- **Functional coverage** with covergroups, cross-coverage, and corner-case bins
+- **SystemVerilog Assertions (SVA)** bound to the DUT for protocol-level checks
+- **Scoreboard** with pass/fail/skip classification for robust result analysis
+
+> **Goal:** Achieve high confidence in the DUT's correctness by covering all critical operational scenarios — simultaneous read/write, address boundary conditions, data corner values, and reset behavior.
+
+---
+
+## Design Under Test
+
+The DUT is a **synchronous dual-port RAM** with independent read and write ports and parameterized width/depth.
+
+| Parameter | Default | Description |
+|:---|:---:|:---|
+| `ADDR_WIDTH` | 8 | Address bus width (2⁸ = 256 locations) |
+| `DATA_WIDTH` | 8 | Data bus width (8-bit words) |
+
+| Port | Direction | Description |
+|:---|:---:|:---|
+| `clk` | Input | System clock |
+| `rst` | Input | Asynchronous active-high reset |
+| `write_en` | Input | Write enable |
+| `write_addr` | Input | Write address |
+| `write_data` | Input | Write data |
+| `read_en` | Input | Read enable |
+| `read_addr` | Input | Read address |
+| `read_data` | Output | Read data (1-cycle registered output) |
+
+**Behavior:**
+- **Write:** On `posedge clk`, if `write_en` is high, `write_data` is stored at `mem[write_addr]`.
+- **Read:** On `posedge clk`, if `read_en` is high, `mem[read_addr]` is driven to `read_data` on the **next cycle** (1-cycle latency).
+- **Reset:** Asynchronously clears all memory locations and `read_data` to `0`.
+
+---
+
+## Architecture
+
+```mermaid
+graph TD
+    subgraph Testbench
+        GEN["Generator<br/><i>Constrained-Random<br/>Transactions</i>"]
+        WR_DRV["Write Driver"]
+        RD_DRV["Read Driver"]
+        WR_MON["Write Monitor"]
+        RD_MON["Read Monitor"]
+        SCB["Scoreboard"]
+        REF["Reference Model<br/><i>Shadow Memory</i>"]
+        COV["Coverage<br/>Collector"]
+        ASR["SVA Assertions<br/><i>bind to DUT</i>"]
+    end
+
+    DUT["Dual-Port RAM<br/><b>DUT</b>"]
+
+    GEN -->|"mailbox"| WR_DRV
+    GEN -->|"mailbox"| RD_DRV
+    GEN -->|"sample()"| COV
+
+    WR_DRV -->|"clocking block"| DUT
+    RD_DRV -->|"clocking block"| DUT
+
+    DUT -->|"write port"| WR_MON
+    DUT -->|"read port"| RD_MON
+
+    WR_MON -->|"mailbox"| SCB
+    RD_MON -->|"mailbox"| SCB
+
+    SCB --- REF
+    ASR -.-|"bound"| DUT
+
+    style DUT fill:#2d3436,stroke:#00cec9,stroke-width:2px,color:#fff
+    style GEN fill:#0984e3,stroke:#74b9ff,color:#fff
+    style SCB fill:#d63031,stroke:#ff7675,color:#fff
+    style REF fill:#d63031,stroke:#ff7675,color:#fff
+    style COV fill:#6c5ce7,stroke:#a29bfe,color:#fff
+    style ASR fill:#e17055,stroke:#fab1a0,color:#fff
+    style WR_DRV fill:#00b894,stroke:#55efc4,color:#fff
+    style RD_DRV fill:#00b894,stroke:#55efc4,color:#fff
+    style WR_MON fill:#fdcb6e,stroke:#ffeaa7,color:#2d3436
+    style RD_MON fill:#fdcb6e,stroke:#ffeaa7,color:#2d3436
+```
+
+**Data Flow:**
+1. **Generator** creates constrained-random `transaction` objects and distributes copies to both drivers via mailboxes.
+2. **Drivers** translate transactions into pin-level activity on the DUT interface using clocking blocks.
+3. **Monitors** passively observe DUT ports and forward captured transactions to the scoreboard.
+4. **Scoreboard** compares DUT read output against the **reference model** (shadow memory), classifying each check as PASS, FAIL, or SKIP.
+5. **Coverage** samples every generated transaction and tracks functional coverage metrics.
+6. **Assertions** are bound to the DUT and continuously check protocol-level invariants.
+
+---
+
+## Directory Structure
 
 ```
-┌────────────────────────────────────────────────────────────┐
-│                        Testbench (tb)                      │
-│                                                            │
-│  ┌──────────┐    ┌─────────────┐    ┌──────────────────┐   │
-│  │ Generator │───►│ Write Driver │───►│                  │   │
-│  │          │    └─────────────┘    │   Dual-Port RAM   │   │
-│  │          │    ┌─────────────┐    │       (DUT)       │   │
-│  │          │───►│ Read Driver  │───►│                  │   │
-│  └──────────┘    └─────────────┘    └──────────────────┘   │
-│                                       │            │       │
-│                  ┌──────────────┐     │            │       │
-│                  │ Write Monitor│◄────┘            │       │
-│                  └──────┬───────┘                  │       │
-│                         │         ┌──────────────┐ │       │
-│                         │         │ Read Monitor │◄┘       │
-│                         │         └──────┬───────┘         │
-│                         ▼                ▼                 │
-│                  ┌─────────────────────────┐               │
-│                  │      Scoreboard         │               │
-│                  │  (Reference Model +     │               │
-│                  │   Compare Logic)        │               │
-│                  └─────────────────────────┘               │
-│                                                            │
-│  ┌──────────────────┐    ┌──────────────────────────────┐  │
-│  │ Functional        │    │ SVA Assertions (bind)        │  │
-│  │ Coverage          │    │  • Reset check               │  │
-│  │  • R/W combos     │    │  • Write-then-read integrity │  │
-│  │  • Address ranges │    │  • Read-data stability       │  │
-│  │  • Data corners   │    │  • No X/Z on controls        │  │
-│  └──────────────────┘    └──────────────────────────────┘  │
-└────────────────────────────────────────────────────────────┘
+.
+├── design.sv              # RTL — Synchronous dual-port RAM
+├── params.sv              # Configurable parameters (ADDR_WIDTH, DATA_WIDTH)
+├── interface.sv           # SV interface with clocking blocks & modports
+│
+├── transaction.sv         # Randomized transaction with constraints
+├── generator.sv           # Stimulus generator
+├── write_driver.sv        # Write-port driver (via clocking block)
+├── read_driver.sv         # Read-port driver (via clocking block)
+├── write_monitor.sv       # Write-port passive monitor
+├── read_monitor.sv        # Read-port passive monitor → 1-cycle latency aligned
+├── reference_model.sv     # Shadow memory with write-tracking
+├── scoreboard.sv          # Self-checking comparator (PASS / FAIL / SKIP)
+├── coverage.sv            # Functional coverage with cross-coverage
+├── assertions.sv          # SVA properties + bind to DUT
+├── environment.sv         # Orchestrates all TB components
+├── test.sv                # Top-level test program
+├── testbench.sv           # Top-level module (clock, reset, DUT, test)
+├── header.svh             # Compilation include-order header
+│
+├── run.sh                 # Xcelium simulation launch script
+├── dump.tcl               # TCL script for VCD waveform dumping
+├── .gitignore             # Excludes simulator artifacts & generated files
+└── README.md              # This file
 ```
 
 ---
 
-## 🧩 DUT: Dual-Port RAM
+## Verification Plan
 
-| Feature | Details |
-|---|---|
-| **Data Width** | 8 bits (configurable) |
-| **Address Width** | 8 bits → 256 locations (configurable) |
-| **Write Port** | Synchronous, edge-triggered |
-| **Read Port** | Synchronous, 1-cycle registered output |
-| **Reset** | Asynchronous active-high — clears all memory and `read_data` |
+### 1. Constrained-Random Stimulus
 
----
+| Constraint | Purpose |
+|:---|:---|
+| `c_valid_op` | At least one port (read or write) must be active per transaction |
+| `c_en_dist` | Biases `write_en` at 70% to build memory state before reads |
+| `c_same_addr_hazard` | Prevents simultaneous read & write to the same address (RAW hazard) |
+| `c_data_corners` | Biases `write_data` toward `0x00` and `0xFF` to hit corner-case coverage bins |
 
-## 📁 File Structure
+### 2. Self-Checking Scoreboard
 
-| File | Description |
-|---|---|
-| `params.sv` | Package with configurable `ADDR_WIDTH` and `DATA_WIDTH` parameters |
-| `interface.sv` | SystemVerilog interface with clocking blocks and modports for each agent |
-| `design.sv` | RTL design — synchronous dual-port RAM |
-| `transaction.sv` | Randomized transaction class with constraints (enable distribution, hazard avoidance, data corners) |
-| `generator.sv` | Stimulus generator — creates constrained-random transactions and distributes to drivers |
-| `write_driver.sv` | Drives write-port signals to the DUT via clocking block |
-| `read_driver.sv` | Drives read-port signals to the DUT via clocking block |
-| `write_monitor.sv` | Passively observes write-port activity and forwards to scoreboard |
-| `read_monitor.sv` | Passively observes read-port and captures data with correct 1-cycle latency alignment |
-| `reference_model.sv` | Shadow memory with write-tracking to enable meaningful read comparisons |
-| `scoreboard.sv` | Self-checking comparator — skips unwritten addresses, reports PASS/FAIL/SKIP |
-| `coverage.sv` | Functional coverage — R/W combinations, address ranges, data corner cases, cross coverage |
-| `assertions.sv` | SVA properties bound to DUT — reset, write-then-read, data stability, no X/Z |
-| `environment.sv` | Orchestrates all verification components — pre_test, test, post_test flow |
-| `test.sv` | Top-level test program — instantiates environment and sets transaction count |
-| `testbench.sv` | Top-level module — clock/reset generation, DUT + test instantiation |
-| `header.svh` | Compilation header — includes all source files in dependency order |
-| `run.sh` | Xcelium (xrun) simulation script with coverage enabled |
-| `dump.tcl` | TCL script for VCD waveform dumping |
+- Maintains a **reference model** with shadow memory that mirrors every DUT write.
+- Tracks which addresses have been written via `addr_written[]` — reads to **unwritten addresses** are classified as **SKIP** (avoids meaningless `0 == 0` comparisons).
+- Each meaningful read comparison produces a **PASS** or **FAIL** verdict.
+- Final report summarizes total checks, pass/fail/skip counts, and overall verdict.
 
----
+### 3. Functional Coverage
 
-## ✅ Verification Features
+```
+cg_ram_ops
+├── cp_write_en          # write active / idle
+├── cp_read_en           # read active / idle
+├── cp_rw_combo          # CROSS: all 4 read/write enable combinations
+├── cp_write_addr        # 4 bins: [0-63], [64-127], [128-191], [192-255]
+├── cp_read_addr         # 4 bins: [0-63], [64-127], [128-191], [192-255]
+├── cp_write_data        # Corner bins: 0x00, 0xFF, others
+└── cp_addr_data_cross   # CROSS: address quartile × data corner values
+```
 
-### Constrained-Random Stimulus
-- At least one port (read or write) is active per transaction
-- Write-enable biased 70/30 to build memory state faster
-- Same-address RAW hazard prevention (`read_addr ≠ write_addr` when both enabled)
-- Data corner biasing — ensures `0x00` and `0xFF` are exercised within feasible transaction counts
+### 4. SVA Assertions
 
-### Self-Checking Scoreboard
-- Reference model with shadow memory tracks all DUT writes
-- Reads are compared only for previously-written addresses (skips meaningless `0 == 0` comparisons)
-- Reports PASS / FAIL / SKIP counts with a summary verdict
+| Assertion | Property | Severity |
+|:---|:---|:---:|
+| `a_reset_clears_read_data` | `read_data == 0` one cycle after `rst` asserts | Error |
+| `a_write_then_read` | Data written at address A is readable one cycle after a read request to A | Error |
+| `a_read_data_stable` | `read_data` holds stable when `read_en` is deasserted | Error |
+| `a_no_x_write_en` | `write_en` must never be `X` or `Z` | Error |
+| `a_no_x_read_en` | `read_en` must never be `X` or `Z` | Error |
 
-### Functional Coverage
-- **`cp_write_en` / `cp_read_en`**: Active vs. idle bins for each port
-- **`cp_rw_combo`**: Cross of read/write enables — all 4 combinations
-- **`cp_write_addr` / `cp_read_addr`**: Address space split into 4 quartile bins
-- **`cp_write_data`**: Corner values (`0x00`, `0xFF`) and general range
-- **`cp_addr_data_cross`**: Cross of address quartiles × data corners
-
-### SVA Assertions (Bound to DUT)
-- **Reset clears `read_data`**: After reset, output must be `8'h00`
-- **Write-then-read integrity**: Data written at address A appears on read one cycle later
-- **Read-data stability**: Output holds steady when `read_en` is deasserted
-- **No X/Z on control signals**: `write_en` and `read_en` must never be unknown
+> All assertions use the **`bind`** construct — they attach to the DUT without modifying RTL source code.
 
 ---
 
-## 🚀 Running the Simulation
+## Getting Started
 
 ### Prerequisites
-- **Cadence Xcelium** (xrun) — tested with Xcelium 25.03
 
-### Simulate
+| Tool | Version | Purpose |
+|:---|:---|:---|
+| Cadence Xcelium (`xrun`) | 25.03+ | Compilation & simulation |
+
+### Running the Simulation
+
+**Option 1 — Direct command:**
+
 ```bash
-xrun -Q -unbuffered \
-     -timescale 1ns/1ns \
-     -sysv \
-     -incdir . \
-     -access +rw \
-     -coverage functional \
+xrun -Q -unbuffered         \
+     -timescale 1ns/1ns     \
+     -sysv                  \
+     -incdir .              \
+     -access +rw            \
+     -coverage functional   \
      design.sv testbench.sv
 ```
 
-Or use the provided script:
+**Option 2 — Using the provided script:**
+
 ```bash
 source run.sh
 ```
 
 ### Expected Output
+
 ```
 ========================================
            SCOREBOARD REPORT
 ========================================
-  Total Meaningful Checks     : <N>
-  PASS                        : <N>
+  Total Meaningful Checks     : N
+  PASS                        : N
   FAIL                        : 0
-  SKIP (addr never written)   : <N>
+  SKIP (addr never written)   : N
 ========================================
   *** ALL MEANINGFUL TESTS PASSED ***
 ========================================
@@ -149,9 +266,11 @@ source run.sh
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
-Edit [`params.sv`](params.sv) to change RAM dimensions:
+### RAM Parameters
+
+Modify [`params.sv`](params.sv) to change the RAM dimensions:
 
 ```systemverilog
 package params_pkg;
@@ -160,14 +279,44 @@ package params_pkg;
 endpackage
 ```
 
-Transaction count is set in [`test.sv`](test.sv):
+### Stimulus Count
+
+Modify the transaction count in [`test.sv`](test.sv):
 
 ```systemverilog
-env.gen.gen_count = 200;   // number of random transactions
+env.gen.gen_count = 200;   // increase for higher coverage
 ```
 
 ---
 
-## 📜 License
+## Key Design Decisions
+
+| Decision | Rationale |
+|:---|:---|
+| **No UVM** | Lightweight, self-contained environment for focused IP-level verification; demonstrates core verification methodology without framework overhead |
+| **Separate read/write drivers & monitors** | Mirrors the independent port architecture of the DUT; enables true concurrent operation |
+| **Clocking blocks with modports** | Eliminates race conditions between testbench and DUT; enforces directional signal access |
+| **Write-tracking in reference model** | Prevents false-positive passes from comparing default-zero values at unwritten addresses |
+| **Data corner biasing via soft constraints** | Guarantees `0x00` and `0xFF` are exercised within practical transaction counts without over-constraining the stimulus space |
+| **Assertions via `bind`** | Non-invasive — RTL source remains untouched; assertions can be reused across different testbenches |
+
+---
+
+## References
+
+- IEEE Std 1800-2017 — *IEEE Standard for SystemVerilog*
+- *SystemVerilog for Verification* — Chris Spear & Greg Tumbush
+- *Writing Testbenches: Functional Verification of HDL Models* — Janick Bergeron
+
+---
+
+## License
 
 This project is provided for educational and reference purposes.
+
+---
+
+## Author
+
+**Eswar Adithya**
+- GitHub: [@EswarAdithya011](https://github.com/EswarAdithya011)
